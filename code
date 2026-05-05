@@ -1,0 +1,119 @@
+/**
+ * SISTEM INVENTARIS BARANG (GAS + SPREADSHEET)
+ * Fitur: Login, Dashboard, Daftar Barang, Barang Masuk, Barang Keluar
+ */
+
+const APP_PASSWORD = "sistempersediaan"; // Ganti password di sini
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle('Sistem Inventaris Barang')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+// Fungsi Setup Database Awal
+function setupDatabase() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 1. Sheet Master Barang
+  let sheetBarang = ss.getSheetByName("Master_Barang");
+  if (!sheetBarang) {
+    sheetBarang = ss.insertSheet("Master_Barang");
+    sheetBarang.appendRow(["Kode Barang", "Nama Barang", "Kategori", "Stok Awal", "Satuan", "Lokasi Rak", "Created At"]);
+    sheetBarang.getRange("A1:G1").setFontWeight("bold").setBackground("#f3f4f6");
+  }
+
+  // 2. Sheet Barang Masuk
+  let sheetMasuk = ss.getSheetByName("Barang_Masuk");
+  if (!sheetMasuk) {
+    sheetMasuk = ss.insertSheet("Barang_Masuk");
+    sheetMasuk.appendRow(["Tanggal", "Kode Barang", "Jumlah", "Keterangan"]);
+    sheetMasuk.getRange("A1:D1").setFontWeight("bold").setBackground("#dcfce7");
+  }
+
+  // 3. Sheet Barang Keluar
+  let sheetKeluar = ss.getSheetByName("Barang_Keluar");
+  if (!sheetKeluar) {
+    sheetKeluar = ss.insertSheet("Barang_Keluar");
+    sheetKeluar.appendRow(["Tanggal", "Kode Barang", "Jumlah", "Tujuan"]);
+    sheetKeluar.getRange("A1:D1").setFontWeight("bold").setBackground("#fee2e2");
+  }
+
+  return "Database berhasil disiapkan!";
+}
+
+// Fungsi Cek Login
+function checkLogin(pass) {
+  return pass === APP_PASSWORD;
+}
+
+// Ambil Semua Data Master
+function getDataBarang() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Master_Barang");
+  const data = sheet.getDataRange().getValues();
+  const headers = data.shift();
+  
+  // Hitung Stok Realtime (Stok Awal + Masuk - Keluar)
+  const masuk = getTransactionTotals("Barang_Masuk");
+  const keluar = getTransactionTotals("Barang_Keluar");
+
+  return data.map(row => {
+    const kode = row[0];
+    const stokAwal = Number(row[3]) || 0;
+    const totalMasuk = masuk[kode] || 0;
+    const totalKeluar = keluar[kode] || 0;
+    const stokAkhir = stokAwal + totalMasuk - totalKeluar;
+
+    return {
+      kode: row[0],
+      nama: row[1],
+      kategori: row[2],
+      stokAwal: stokAwal,
+      satuan: row[4],
+      lokasi: row[5],
+      stokAkhir: stokAkhir
+    };
+  });
+}
+
+function getTransactionTotals(sheetName) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  const data = sheet.getDataRange().getValues();
+  data.shift();
+  const totals = {};
+  data.forEach(row => {
+    const kode = row[1];
+    const qty = Number(row[2]) || 0;
+    totals[kode] = (totals[kode] || 0) + qty;
+  });
+  return totals;
+}
+
+// Simpan Barang Baru
+function addBarang(obj) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Master_Barang");
+  sheet.appendRow([obj.kode, obj.nama, obj.kategori, obj.stokAwal, obj.satuan, obj.lokasi, new Date()]);
+  return true;
+}
+
+// Simpan Transaksi (Masuk/Keluar)
+function addTransaction(type, obj) {
+  const sheetName = type === 'masuk' ? "Barang_Masuk" : "Barang_Keluar";
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  sheet.appendRow([new Date(), obj.kode, obj.jumlah, obj.info]);
+  return true;
+}
+
+// Ambil Ringkasan untuk Dashboard
+function getDashboardStats() {
+  const barang = getDataBarang();
+  const totalJenis = barang.length;
+  const lowStock = barang.filter(b => b.stokAkhir < 10).length;
+  
+  return {
+    totalJenis: totalJenis,
+    lowStock: lowStock,
+    totalItems: barang.reduce((acc, curr) => acc + curr.stokAkhir, 0)
+  };
+}
